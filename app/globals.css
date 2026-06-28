@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * AI Ecosystem Catalogue — visual identity.
+ * A dark "command-center" canvas: deep navy base, starfield, per-lab accents,
+ * and a traffic-light status system (green = GA, amber = preview, red = locked).
+ * Components reference only these semantic tokens.
+ * ───────────────────────────────────────────────────────────────────────────── */
+@theme {
+  /* surfaces — deep space */
+  --color-canvas: #0a0e1a;
+  --color-surface: #121829;
+  --color-raised: #19203450;
+  --color-edge: #28324d;
+  --color-edge-bright: #3a4768;
+
+  /* text */
+  --color-ink: #eef2fb;
+  --color-muted: #9aa6c4;
+  --color-subtle: #66708c;
+
+  /* brand accent — electric violet */
+  --color-accent: #7c6cff;
+  --color-accent-2: #b072ff;
+
+  /* status traffic lights */
+  --color-go: #2fd27a; /* GA */
+  --color-warn: #f2b441; /* preview */
+  --color-stop: #ff5468; /* restricted / suspended */
+  --color-mutedstatus: #7c87a6; /* research / deprecated */
+
+  /* radius */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 28px;
+
+  /* fonts */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background:
+    radial-gradient(900px 600px at 85% -5%, rgba(124, 108, 255, 0.16), transparent 60%),
+    radial-gradient(700px 500px at 10% 5%, rgba(176, 114, 255, 0.1), transparent 55%),
+    var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  min-height: 100dvh;
+  font-feature-settings: "tnum" 1, "ss01" 1;
+}
+
+/* subtle starfield overlay */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    radial-gradient(1px 1px at 20% 30%, rgba(255, 255, 255, 0.35), transparent),
+    radial-gradient(1px 1px at 70% 20%, rgba(255, 255, 255, 0.25), transparent),
+    radial-gradient(1px 1px at 40% 70%, rgba(255, 255, 255, 0.2), transparent),
+    radial-gradient(1px 1px at 85% 60%, rgba(255, 255, 255, 0.3), transparent),
+    radial-gradient(1px 1px at 55% 45%, rgba(255, 255, 255, 0.15), transparent);
+  opacity: 0.5;
+}
+
+/* pulsing dot for restricted/suspended status */
+@keyframes statuspulse {
+  0%, 100% { box-shadow: 0 0 0 0 currentColor; opacity: 1; }
+  50% { box-shadow: 0 0 0 5px transparent; opacity: 0.6; }
+}
+.pulse {
+  animation: statuspulse 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse { animation: none; }
+}
+
+/* thin scrollbars in the explorer */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-edge-bright) transparent;
+}

@@ -69,3 +69,51 @@ export async function deletePlan(id: string): Promise<void> {
   await r.del(KEY(id));
   await r.zrem(INDEX, id);
 }
+
+// ── Project context profiles ────────────────────────────────────────────────
+// A per-project brief (brand, voice, what already exists, constraints) injected
+// into the council so it plans WITH context instead of blind.
+
+export interface ProjectContext {
+  slug: string;
+  name: string;
+  brief: string;
+  updatedAt: number;
+}
+
+export {slugify} from "./slug";
+
+const CTX = (slug: string) => `context:${slug}`;
+const CTX_INDEX = "contexts:index";
+
+export async function saveContext(c: ProjectContext): Promise<void> {
+  const r = getRedis();
+  if (!r) throw new Error("Storage not configured.");
+  await r.set(CTX(c.slug), c);
+  await r.sadd(CTX_INDEX, c.slug);
+}
+
+export async function getContext(slug: string): Promise<ProjectContext | null> {
+  const r = getRedis();
+  if (!r) return null;
+  return ((await r.get(CTX(slug))) as ProjectContext | null) ?? null;
+}
+
+export async function listContexts(): Promise<{ slug: string; name: string; updatedAt: number }[]> {
+  const r = getRedis();
+  if (!r) throw new Error("Storage not configured.");
+  const slugs = (await r.smembers(CTX_INDEX)) as string[];
+  if (!slugs.length) return [];
+  const full = (await r.mget(...slugs.map(CTX))) as (ProjectContext | null)[];
+  return full
+    .filter((c): c is ProjectContext => c !== null)
+    .map(({ slug, name, updatedAt }) => ({ slug, name, updatedAt }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function deleteContext(slug: string): Promise<void> {
+  const r = getRedis();
+  if (!r) throw new Error("Storage not configured.");
+  await r.del(CTX(slug));
+  await r.srem(CTX_INDEX, slug);
+}

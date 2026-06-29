@@ -142,13 +142,20 @@ function lensInstruction(label?: string): string {
   return label ? ` ${LENSES.find((l) => l.label === label)?.instruction ?? ""}` : "";
 }
 
-const planPrompt = (idea: string, lens?: string) =>
+// When a project brief is supplied, the council must build ON the existing
+// project (extend what's there) rather than plan in a vacuum.
+function contextBlock(context?: string): string {
+  if (!context || !context.trim()) return "";
+  return `\n\nPROJECT CONTEXT — this describes the EXISTING project. Honor it: build on what already exists (schemas, stack, brand, conventions), extend rather than recreate, and match the established voice/tooling. If the idea overlaps something that already exists, say so and integrate.\n${context.trim()}\n`;
+}
+
+const planPrompt = (idea: string, lens?: string, context?: string) =>
   `You are a pragmatic principal engineer.${lensInstruction(lens)}
 
 ${BUILDER_PROFILE}
 
 ${toolingBrief()}
-
+${contextBlock(context)}
 A builder describes a project below. Produce a concise, opinionated build plan: recommended stack/approach, 3–5 phased milestones, the top risks/unknowns, and which model(s)/APIs to use for any AI features. Be specific and decisive. Markdown, ~300–450 words. Respond with the plan only.
 
 PROJECT IDEA:
@@ -201,7 +208,7 @@ function callProvider(provider: Provider, prompt: string, model: string, maxToke
 }
 
 // ── Phase 1 — propose ───────────────────────────────────────────────────────
-export async function proposePlans(idea: string): Promise<MemberResult[]> {
+export async function proposePlans(idea: string, context?: string): Promise<MemberResult[]> {
   const members = configuredMembers();
   if (members.length === 0) {
     throw new Error(
@@ -209,7 +216,9 @@ export async function proposePlans(idea: string): Promise<MemberResult[]> {
     );
   }
   const settled = await Promise.allSettled(
-    members.map((m) => withTimeout(callProvider(m.provider, planPrompt(idea, m.lens), m.model), CALL_TIMEOUT_MS, m.label)),
+    members.map((m) =>
+      withTimeout(callProvider(m.provider, planPrompt(idea, m.lens, context), m.model), CALL_TIMEOUT_MS, m.label),
+    ),
   );
   return members.map((m, i): MemberResult => {
     const s = settled[i];
@@ -225,7 +234,7 @@ export async function proposePlans(idea: string): Promise<MemberResult[]> {
 }
 
 // ── Phase 2 — synthesize (Claude) ───────────────────────────────────────────
-async function synthesize(idea: string, members: MemberResult[]): Promise<string> {
+async function synthesize(idea: string, members: MemberResult[], context?: string): Promise<string> {
   if (!process.env.ANTHROPIC_API_KEY) throw new Error("Synthesis needs ANTHROPIC_API_KEY.");
   const ok = members.filter((r) => r.plan);
   const blocks = ok
@@ -239,12 +248,12 @@ Structure:
 3. **Where they diverged** — the real decisions, with your call on each.
 4. **Alternative plan** — only if a genuinely different approach is defensible.
 
-Be decisive — you're the deciding architect, not a summarizer. For any AI features, name the exact API model id. Markdown.
+Be decisive — you're the deciding architect, not a summarizer. For any AI features, name the exact API model id. If the project context shows something already exists, plan to extend it, not rebuild it. Markdown.
 
 ${BUILDER_PROFILE}
 
 ${toolingBrief()}
-
+${contextBlock(context)}
 PROJECT IDEA:
 ${idea}
 
@@ -256,12 +265,13 @@ ${blocks}`;
 export async function synthesizePlans(
   idea: string,
   members: MemberResult[],
+  context?: string,
 ): Promise<{ synthesis: string | null; synthesisError?: string }> {
   if (!members.some((r) => r.plan)) {
     return { synthesis: null, synthesisError: "Nothing to synthesize — every member failed." };
   }
   try {
-    return { synthesis: await withTimeout(synthesize(idea, members), CALL_TIMEOUT_MS, "Synthesis") };
+    return { synthesis: await withTimeout(synthesize(idea, members, context), CALL_TIMEOUT_MS, "Synthesis") };
   } catch (e) {
     return { synthesis: null, synthesisError: e instanceof Error ? e.message : "Synthesis failed." };
   }
@@ -272,7 +282,7 @@ export async function synthesizePlans(
 // call light enough to finish inside the serverless time limit.
 const REV_MARKER = "## Revisions to apply";
 
-export async function critiquePlan(idea: string, synthesis: string): Promise<CritiqueResult> {
+export async function critiquePlan(idea: string, synthesis: string, context?: string): Promise<CritiqueResult> {
   const cm = configuredMembers();
   // Prefer a non-Anthropic critic (the synthesizer is Anthropic) for real diversity.
   const critic = cm.find((m) => m.provider !== "anthropic") ?? cm[0];
@@ -290,7 +300,7 @@ ${BUILDER_PROFILE}
 
 ${toolingBrief()}
 The calling protocols and model ids above are current and correct — do NOT flag them as unverified, and do not tell the user to remove documented params (e.g. output_config.effort, adaptive thinking). Critique the plan's design, logic, security, modality fit, and gaps instead.
-
+${contextBlock(context)}
 PROJECT IDEA:
 ${idea}
 

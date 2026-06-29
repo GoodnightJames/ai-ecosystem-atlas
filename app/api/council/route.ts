@@ -31,7 +31,13 @@ export async function POST(req: Request) {
     return Response.json({ error: "Wrong or missing passcode." }, { status: 401 });
   }
 
-  let body: { idea?: unknown; phase?: unknown; members?: unknown; synthesis?: unknown };
+  let body: {
+    idea?: unknown;
+    phase?: unknown;
+    members?: unknown;
+    synthesis?: unknown;
+    context?: unknown;
+  };
   try {
     body = await req.json();
   } catch {
@@ -44,6 +50,7 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
+  const context = typeof body.context === "string" ? body.context : undefined;
 
   try {
     // Two phases (each its own request) keep every invocation under the
@@ -52,17 +59,17 @@ export async function POST(req: Request) {
       if (!Array.isArray(body.members)) {
         return Response.json({ error: "Missing member plans to synthesize." }, { status: 400 });
       }
-      const out = await synthesizePlans(idea.trim(), body.members as MemberResult[]);
+      const out = await synthesizePlans(idea.trim(), body.members as MemberResult[], context);
       return Response.json(out);
     }
     if (body.phase === "critique") {
       if (typeof body.synthesis !== "string" || !body.synthesis.trim()) {
         return Response.json({ error: "Missing synthesis to critique." }, { status: 400 });
       }
-      const out = await critiquePlan(idea.trim(), body.synthesis);
+      const out = await critiquePlan(idea.trim(), body.synthesis, context);
       return Response.json(out);
     }
-    const members = await proposePlans(idea.trim());
+    const members = await proposePlans(idea.trim(), context);
     return Response.json({ members });
   } catch (e) {
     return Response.json(

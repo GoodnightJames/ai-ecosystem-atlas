@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Markdown } from "@/components/kit/Markdown";
 import { CopyButton } from "@/components/kit/CopyButton";
 import { planMarkdown, agentPrompt, downloadMarkdown } from "@/lib/plan-export";
+import { slugify } from "@/lib/slug";
 
 interface MemberResult {
   provider: string;
@@ -44,21 +45,52 @@ export function CouncilForm() {
   const [refine, setRefine] = useState("");
   const [project, setProject] = useState("");
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
+  const [contextBrief, setContextBrief] = useState<string | null>(null);
+  const [contextName, setContextName] = useState<string | null>(null);
+
+  async function loadContext(name: string, pc = passcode) {
+    const slug = slugify(name);
+    if (!slug || !pc) {
+      setContextBrief(null);
+      setContextName(null);
+      return;
+    }
+    try {
+      const r = await fetch(`/api/context?slug=${encodeURIComponent(slug)}`, {
+        headers: { "x-council-passcode": pc },
+      });
+      if (r.ok) {
+        const d = await r.json();
+        setContextBrief(d.brief);
+        setContextName(d.name);
+      } else {
+        setContextBrief(null);
+        setContextName(null);
+      }
+    } catch {
+      setContextBrief(null);
+      setContextName(null);
+    }
+  }
 
   useEffect(() => {
-    setPasscode(localStorage.getItem(PASSCODE_KEY) ?? "");
-    setProject(localStorage.getItem(PROJECT_KEY) ?? "");
+    const pc = localStorage.getItem(PASSCODE_KEY) ?? "";
+    const proj = localStorage.getItem(PROJECT_KEY) ?? "";
+    setPasscode(pc);
+    setProject(proj);
+    if (proj) loadContext(proj, pc);
     fetch("/api/council")
       .then((r) => r.json())
       .then(setConfig)
       .catch(() => setConfig({ ready: false, members: [] }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const post = (body: object) =>
     fetch("/api/council", {
       method: "POST",
       headers: { "content-type": "application/json", "x-council-passcode": passcode },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, context: contextBrief ?? undefined }),
     });
 
   async function run(theIdea: string) {
@@ -163,7 +195,14 @@ export function CouncilForm() {
           value={passcode}
           onChange={(e) => setPasscode(e.target.value)}
           placeholder="Passcode"
-          className="w-40 rounded-lg border border-edge bg-surface px-3 py-2 text-sm text-ink outline-none placeholder:text-subtle focus:border-edge-bright"
+          className="w-36 rounded-lg border border-edge bg-surface px-3 py-2 text-sm text-ink outline-none placeholder:text-subtle focus:border-edge-bright"
+        />
+        <input
+          value={project}
+          onChange={(e) => setProject(e.target.value)}
+          onBlur={() => loadContext(project)}
+          placeholder="Project (for context + saving)"
+          className="w-56 rounded-lg border border-edge bg-surface px-3 py-2 text-sm text-ink outline-none placeholder:text-subtle focus:border-edge-bright"
         />
         <button
           type="button"
@@ -181,6 +220,23 @@ export function CouncilForm() {
         </button>
         {busy && <span className="text-xs text-subtle">3 phases, ~20–40s each.</span>}
       </div>
+
+      {/* Context status */}
+      {project.trim() && (
+        <p className="mt-2 text-xs">
+          {contextBrief ? (
+            <span style={{ color: "var(--color-go)" }}>
+              ✓ Context loaded: {contextName} — the council will plan with it.
+            </span>
+          ) : (
+            <span className="text-subtle">
+              No saved context for “{project}”.{" "}
+              <a href="/context" className="text-accent hover:underline">Add one</a> so the council
+              plans with your brand &amp; existing code.
+            </span>
+          )}
+        </p>
+      )}
 
       {error && (
         <p
@@ -213,13 +269,7 @@ export function CouncilForm() {
                   <CopyButton text={exportText} label="Copy" />
                   <CopyButton text={ccPrompt} label="Copy for Claude Code / Codex" />
                   <button type="button" onClick={() => downloadMarkdown(exportText, "build-plan.md")} className="rounded-md border border-edge px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:bg-raised hover:text-ink">.md</button>
-                  <input
-                    value={project}
-                    onChange={(e) => setProject(e.target.value)}
-                    placeholder="Project"
-                    className="w-24 rounded-md border border-edge bg-surface px-2 py-1 text-xs text-ink outline-none placeholder:text-subtle focus:border-edge-bright"
-                  />
-                  <button type="button" onClick={saveCurrent} className="rounded-md border border-edge px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:bg-raised hover:text-ink">Save</button>
+                  <button type="button" onClick={saveCurrent} className="rounded-md border border-edge px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:bg-raised hover:text-ink" title={project ? `Save to "${project}"` : "Set a project up top first"}>Save{project ? ` → ${project}` : ""}</button>
                   {savedMsg && (
                     <span className="text-xs text-subtle">
                       {savedMsg}{savedMsg === "Saved ✓" && <> · <a href="/plans" className="text-accent hover:underline">library</a></>}

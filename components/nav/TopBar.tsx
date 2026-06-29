@@ -7,6 +7,7 @@ const MOBILE_LINKS = [
   { href: "/", label: "Overview" },
   { href: "/build", label: "Plan" },
   { href: "/plans", label: "Library" },
+  { href: "/context", label: "Context" },
   { href: "/choose", label: "Choose" },
   { href: "/compare", label: "Compare" },
   { href: "/status", label: "Status" },

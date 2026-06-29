@@ -25,18 +25,10 @@ interface Config {
   ready: boolean;
   members: { provider: string; label: string; model: string; lens?: string }[];
 }
-interface SavedPlan {
-  id: string;
-  idea: string;
-  members: MemberResult[];
-  synth: Synth | null;
-  critique: Critique | null;
-  savedAt: string;
-}
 type Phase = "idle" | "proposing" | "synthesizing" | "hardening";
 
 const PASSCODE_KEY = "council-passcode";
-const SAVED_KEY = "council-saved";
+const PROJECT_KEY = "council-project";
 
 function CopyBtn({ text, label }: { text: string; label: string }) {
   const [done, setDone] = useState(false);
@@ -67,13 +59,12 @@ export function CouncilForm() {
   const [synth, setSynth] = useState<Synth | null>(null);
   const [critique, setCritique] = useState<Critique | null>(null);
   const [refine, setRefine] = useState("");
-  const [saved, setSaved] = useState<SavedPlan[]>([]);
+  const [project, setProject] = useState("");
+  const [savedMsg, setSavedMsg] = useState<string | null>(null);
 
   useEffect(() => {
     setPasscode(localStorage.getItem(PASSCODE_KEY) ?? "");
-    try {
-      setSaved(JSON.parse(localStorage.getItem(SAVED_KEY) ?? "[]"));
-    } catch {}
+    setProject(localStorage.getItem(PROJECT_KEY) ?? "");
     fetch("/api/council")
       .then((r) => r.json())
       .then(setConfig)
@@ -131,29 +122,21 @@ export function CouncilForm() {
     run(augmented);
   }
 
-  function persistSaved(next: SavedPlan[]) {
-    setSaved(next);
-    localStorage.setItem(SAVED_KEY, JSON.stringify(next.slice(0, 25)));
-  }
-  function saveCurrent() {
+  async function saveCurrent() {
     if (!members) return;
-    const entry: SavedPlan = {
-      id: `${Date.now()}`,
-      idea,
-      members,
-      synth,
-      critique,
-      savedAt: new Date().toLocaleString(),
-    };
-    persistSaved([entry, ...saved]);
-  }
-  function loadSaved(s: SavedPlan) {
-    setIdea(s.idea);
-    setMembers(s.members);
-    setSynth(s.synth);
-    setCritique(s.critique);
-    setError(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    setSavedMsg("Saving…");
+    localStorage.setItem(PROJECT_KEY, project);
+    try {
+      const r = await fetch("/api/plans", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-council-passcode": passcode },
+        body: JSON.stringify({ project, title: idea.slice(0, 80), idea, members, synth, critique }),
+      });
+      const d = await r.json();
+      setSavedMsg(r.ok ? "Saved ✓" : d.error ?? "Save failed.");
+    } catch {
+      setSavedMsg("Save failed.");
+    }
   }
 
   const busy = phase !== "idle";
@@ -239,31 +222,6 @@ export function CouncilForm() {
         </p>
       )}
 
-      {/* Saved plans */}
-      {saved.length > 0 && (
-        <details className="mt-5 rounded-lg border border-edge bg-surface">
-          <summary className="cursor-pointer list-none px-4 py-2.5 text-sm font-medium text-ink">
-            <span className="mr-2 text-subtle" aria-hidden>▸</span>Saved plans ({saved.length})
-          </summary>
-          <ul className="border-t border-edge">
-            {saved.map((s) => (
-              <li key={s.id} className="flex items-center gap-2 border-b border-edge px-4 py-2 last:border-b-0">
-                <button onClick={() => loadSaved(s)} className="min-w-0 flex-1 text-left text-sm text-muted hover:text-ink">
-                  <span className="line-clamp-1">{s.idea}</span>
-                  <span className="text-xs text-subtle">{s.savedAt}</span>
-                </button>
-                <button
-                  onClick={() => persistSaved(saved.filter((x) => x.id !== s.id))}
-                  className="text-xs text-subtle hover:text-[color:var(--color-stop)]"
-                >
-                  delete
-                </button>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-
       {/* Results */}
       {members && (
         <div className="mt-8">
@@ -282,11 +240,22 @@ export function CouncilForm() {
                   <span className="text-accent" aria-hidden>✦</span>
                   Synthesized plan
                 </h2>
-                <div className="flex gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <CopyBtn text={exportText} label="Copy" />
                   <CopyBtn text={claudeCodePrompt} label="Copy for Claude Code" />
                   <button type="button" onClick={downloadMd} className="rounded-md border border-edge px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:bg-raised hover:text-ink">.md</button>
+                  <input
+                    value={project}
+                    onChange={(e) => setProject(e.target.value)}
+                    placeholder="Project"
+                    className="w-24 rounded-md border border-edge bg-surface px-2 py-1 text-xs text-ink outline-none placeholder:text-subtle focus:border-edge-bright"
+                  />
                   <button type="button" onClick={saveCurrent} className="rounded-md border border-edge px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:bg-raised hover:text-ink">Save</button>
+                  {savedMsg && (
+                    <span className="text-xs text-subtle">
+                      {savedMsg}{savedMsg === "Saved ✓" && <> · <a href="/plans" className="text-accent hover:underline">library</a></>}
+                    </span>
+                  )}
                 </div>
               </div>
               {critique?.revisions && critique.critic && (

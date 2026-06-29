@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const MOBILE_LINKS = [
   { href: "/", label: "Overview" },
   { href: "/build", label: "Plan" },
+  { href: "/plans", label: "Library" },
   { href: "/choose", label: "Choose" },
   { href: "/compare", label: "Compare" },
   { href: "/status", label: "Status" },

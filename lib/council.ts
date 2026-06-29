@@ -69,11 +69,25 @@ Cover: the recommended stack/approach, 3–5 phased milestones, the top risks or
 PROJECT IDEA:
 ${idea}`;
 
+/** Cut a hung provider call loose so the whole serverless invocation can still
+ * return before Vercel's wall-clock limit (60s on Hobby). The underlying request
+ * keeps running but we stop waiting on it. */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} took longer than ${ms / 1000}s`)), ms),
+    ),
+  ]);
+}
+
+const CALL_TIMEOUT_MS = 50_000;
+
 async function askAnthropic(idea: string, model: string): Promise<string> {
   const client = new Anthropic();
   const msg = await client.messages.create({
     model,
-    max_tokens: 3000,
+    max_tokens: 2000,
     messages: [{ role: "user", content: planPrompt(idea) }],
   });
   return msg.content
@@ -88,7 +102,7 @@ async function askOpenAI(idea: string, model: string): Promise<string> {
   const res = await client.responses.create({
     model,
     input: planPrompt(idea),
-    max_output_tokens: 3000,
+    max_output_tokens: 2000,
   });
   return (res.output_text ?? "").trim();
 }
@@ -128,7 +142,7 @@ async function synthesize(
   const client = new Anthropic();
   const msg = await client.messages.create({
     model: process.env.COUNCIL_ANTHROPIC_MODEL || "claude-opus-4-8",
-    max_tokens: 3500,
+    max_tokens: 3000,
     messages: [
       {
         role: "user",
@@ -157,22 +171,23 @@ ${blocks}`,
     .trim();
 }
 
-export async function runCouncil(idea: string): Promise<CouncilResult> {
+/**
+ * PHASE 1 — ask every configured model in parallel (each with its own timeout so
+ * one slow model can't blow the serverless budget). One HTTP round on its own.
+ */
+export async function proposePlans(idea: string): Promise<MemberResult[]> {
   const members = configuredMembers();
   if (members.length === 0) {
     throw new Error(
       "No council members configured. Set ANTHROPIC_API_KEY (and optionally OPENAI_API_KEY + COUNCIL_OPENAI_MODEL, GEMINI_API_KEY + COUNCIL_GOOGLE_MODEL).",
     );
   }
-
   const settled = await Promise.allSettled(
-    members.map((m) => callMember(idea, m)),
+    members.map((m) => withTimeout(callMember(idea, m), CALL_TIMEOUT_MS, m.label)),
   );
-  const results: MemberResult[] = members.map((m, i) => {
+  return members.map((m, i): MemberResult => {
     const s = settled[i];
-    if (s.status === "fulfilled" && s.value) {
-      return { ...m, plan: s.value };
-    }
+    if (s.status === "fulfilled" && s.value) return { ...m, plan: s.value };
     const reason =
       s.status === "rejected"
         ? s.reason instanceof Error
@@ -181,18 +196,31 @@ export async function runCouncil(idea: string): Promise<CouncilResult> {
         : "Empty response.";
     return { ...m, plan: null, error: reason };
   });
+}
 
-  let synthesis: string | null = null;
-  let synthesisError: string | undefined;
-  if (results.some((r) => r.plan)) {
-    try {
-      synthesis = await synthesize(idea, results);
-    } catch (e) {
-      synthesisError = e instanceof Error ? e.message : "Synthesis failed.";
-    }
-  } else {
-    synthesisError = "Every council member failed — nothing to synthesize.";
+/**
+ * PHASE 2 — merge the proposals with Claude. A separate HTTP round so each stays
+ * under the function time limit.
+ */
+export async function synthesizePlans(
+  idea: string,
+  members: MemberResult[],
+): Promise<{ synthesis: string | null; synthesisError?: string }> {
+  if (!members.some((r) => r.plan)) {
+    return { synthesis: null, synthesisError: "Nothing to synthesize — every member failed." };
   }
+  try {
+    const synthesis = await withTimeout(synthesize(idea, members), CALL_TIMEOUT_MS, "Synthesis");
+    return { synthesis };
+  } catch (e) {
+    return { synthesis: null, synthesisError: e instanceof Error ? e.message : "Synthesis failed." };
+  }
+}
 
-  return { members: results, synthesis, synthesisError };
+/** One-shot (both phases) — fine for short ideas / direct API use; the UI splits
+ * the two phases to stay under the serverless time limit on richer ideas. */
+export async function runCouncil(idea: string): Promise<CouncilResult> {
+  const members = await proposePlans(idea);
+  const { synthesis, synthesisError } = await synthesizePlans(idea, members);
+  return { members, synthesis, synthesisError };
 }

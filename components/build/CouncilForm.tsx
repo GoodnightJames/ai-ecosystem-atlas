@@ -10,16 +10,12 @@ interface MemberResult {
   plan: string | null;
   error?: string;
 }
-interface CouncilResult {
-  members: MemberResult[];
-  synthesis: string | null;
-  synthesisError?: string;
-}
 interface Config {
   ready: boolean;
   passcodeRequired: boolean;
   members: { provider: string; label: string; model: string }[];
 }
+type Phase = "idle" | "proposing" | "synthesizing";
 
 const PASSCODE_KEY = "council-passcode";
 
@@ -27,9 +23,10 @@ export function CouncilForm() {
   const [config, setConfig] = useState<Config | null>(null);
   const [idea, setIdea] = useState("");
   const [passcode, setPasscode] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<CouncilResult | null>(null);
+  const [members, setMembers] = useState<MemberResult[] | null>(null);
+  const [synth, setSynth] = useState<{ synthesis: string | null; synthesisError?: string } | null>(null);
 
   useEffect(() => {
     setPasscode(localStorage.getItem(PASSCODE_KEY) ?? "");
@@ -39,47 +36,55 @@ export function CouncilForm() {
       .catch(() => setConfig({ ready: false, passcodeRequired: false, members: [] }));
   }, []);
 
+  const post = (extra: object) =>
+    fetch("/api/council", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-council-passcode": passcode },
+      body: JSON.stringify({ idea, ...extra }),
+    });
+
   async function convene() {
-    setLoading(true);
     setError(null);
-    setResult(null);
+    setMembers(null);
+    setSynth(null);
     localStorage.setItem(PASSCODE_KEY, passcode);
+    setPhase("proposing");
     try {
-      const r = await fetch("/api/council", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-council-passcode": passcode },
-        body: JSON.stringify({ idea }),
-      });
-      const data = await r.json();
-      if (!r.ok) {
-        setError(data.error ?? `Request failed (${r.status}).`);
-      } else {
-        setResult(data);
+      // Phase 1 — each model proposes.
+      const r1 = await post({});
+      const d1 = await r1.json();
+      if (!r1.ok) {
+        setError(d1.error ?? `Request failed (${r1.status}).`);
+        setPhase("idle");
+        return;
       }
+      setMembers(d1.members);
+      // Phase 2 — Claude synthesizes.
+      setPhase("synthesizing");
+      const r2 = await post({ phase: "synthesize", members: d1.members });
+      const d2 = await r2.json();
+      setSynth(
+        r2.ok ? d2 : { synthesis: null, synthesisError: d2.error ?? `Synthesis failed (${r2.status}).` },
+      );
     } catch {
       setError("Network error reaching the council.");
     } finally {
-      setLoading(false);
+      setPhase("idle");
     }
   }
 
   const memberCount = config?.members.length ?? 0;
-  const canSubmit = idea.trim().length >= 10 && passcode.trim() && !loading;
+  const busy = phase !== "idle";
+  const canSubmit = idea.trim().length >= 10 && passcode.trim().length > 0 && !busy;
 
   return (
     <div className="mt-6">
-      {/* Config banner */}
       {config && !config.ready && (
         <div className="mb-5 rounded-lg border border-edge bg-surface p-4 text-sm text-muted">
           <p className="font-medium text-ink">The council isn&rsquo;t enabled on this deployment yet.</p>
           <p className="mt-1">
             Set <code className="font-mono text-xs text-ink">COUNCIL_PASSCODE</code> and at least{" "}
-            <code className="font-mono text-xs text-ink">ANTHROPIC_API_KEY</code> in the Vercel
-            environment. Add <code className="font-mono text-xs text-ink">OPENAI_API_KEY</code> +{" "}
-            <code className="font-mono text-xs text-ink">COUNCIL_OPENAI_MODEL</code> and{" "}
-            <code className="font-mono text-xs text-ink">GEMINI_API_KEY</code> +{" "}
-            <code className="font-mono text-xs text-ink">COUNCIL_GOOGLE_MODEL</code> to add more
-            members. You can still type below — calls will return a setup error until then.
+            <code className="font-mono text-xs text-ink">ANTHROPIC_API_KEY</code> in the environment.
           </p>
         </div>
       )}
@@ -90,7 +95,6 @@ export function CouncilForm() {
         </p>
       )}
 
-      {/* Form */}
       <label className="mb-1.5 block text-sm font-medium text-ink">Describe your project or idea</label>
       <textarea
         value={idea}
@@ -114,43 +118,56 @@ export function CouncilForm() {
           disabled={!canSubmit}
           className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {loading ? `Consulting ${memberCount || ""} models…` : "Convene the council"}
+          {phase === "proposing"
+            ? `Consulting ${memberCount || ""} models…`
+            : phase === "synthesizing"
+              ? "Synthesizing…"
+              : "Convene the council"}
         </button>
-        {loading && (
-          <span className="text-xs text-subtle">This can take 20–40s while each model thinks.</span>
-        )}
+        {busy && <span className="text-xs text-subtle">Each phase can take 20–40s.</span>}
       </div>
 
       {error && (
-        <p className="mt-4 rounded-lg border border-[color:var(--color-stop)]/40 bg-[color:var(--color-stop)]/10 px-3 py-2 text-sm" style={{ color: "var(--color-stop)" }}>
+        <p
+          className="mt-4 rounded-lg border px-3 py-2 text-sm"
+          style={{ borderColor: "color-mix(in srgb, var(--color-stop) 40%, transparent)", background: "color-mix(in srgb, var(--color-stop) 10%, transparent)", color: "var(--color-stop)" }}
+        >
           {error}
         </p>
       )}
 
-      {/* Results */}
-      {result && (
+      {/* Synthesis (top) */}
+      {members && (
         <div className="mt-8">
-          {result.synthesis ? (
+          {phase === "synthesizing" ? (
+            <div className="rounded-xl border border-accent/40 bg-accent/[0.06] p-5 text-sm text-muted">
+              <span className="text-accent" aria-hidden>✦</span> Synthesizing the strongest plan from{" "}
+              {members.filter((m) => m.plan).length} proposal(s)…
+            </div>
+          ) : synth?.synthesis ? (
             <section className="rounded-xl border border-accent/40 bg-accent/[0.06] p-5">
               <h2 className="mb-3 flex items-center gap-2 text-base font-bold text-ink">
                 <span className="text-accent" aria-hidden>✦</span> Synthesized plan
               </h2>
-              <Markdown text={result.synthesis} />
+              <Markdown text={synth.synthesis} />
             </section>
-          ) : (
-            <p className="text-sm text-subtle">{result.synthesisError}</p>
-          )}
+          ) : synth?.synthesisError ? (
+            <p className="text-sm text-subtle">{synth.synthesisError}</p>
+          ) : null}
 
+          {/* Member proposals */}
           <h3 className="mb-2 mt-8 text-sm font-semibold uppercase tracking-wide text-subtle">
             What each model proposed
           </h3>
           <div className="flex flex-col gap-2">
-            {result.members.map((m) => (
+            {members.map((m) => (
               <details key={m.provider} className="rounded-lg border border-edge bg-surface">
                 <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium text-ink">
                   <span className="mr-2 text-subtle" aria-hidden>▸</span>
                   {m.label} <span className="font-mono text-xs text-subtle">{m.model}</span>
-                  {m.error && <span className="ml-2 text-xs" style={{ color: "var(--color-stop)" }}>failed</span>}
+                  {m.error && (
+                    <span className="ml-2 text-xs" style={{ color: "var(--color-stop)" }}>failed</span>
+                  )}
                 </summary>
                 <div className="border-t border-edge px-4 py-3">
                   {m.plan ? (

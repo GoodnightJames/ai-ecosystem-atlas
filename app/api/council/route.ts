@@ -1,4 +1,5 @@
-import { configuredMembers, runCouncil } from "@/lib/council";
+import { configuredMembers, proposePlans, synthesizePlans } from "@/lib/council";
+import type { MemberResult } from "@/lib/council";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,12 +31,13 @@ export async function POST(req: Request) {
     return Response.json({ error: "Wrong or missing passcode." }, { status: 401 });
   }
 
-  let idea: unknown;
+  let body: { idea?: unknown; phase?: unknown; members?: unknown };
   try {
-    ({ idea } = await req.json());
+    body = await req.json();
   } catch {
     return Response.json({ error: "Invalid request body." }, { status: 400 });
   }
+  const idea = body.idea;
   if (typeof idea !== "string" || idea.trim().length < 10) {
     return Response.json(
       { error: "Describe your idea in at least a sentence." },
@@ -44,8 +46,17 @@ export async function POST(req: Request) {
   }
 
   try {
-    const result = await runCouncil(idea.trim());
-    return Response.json(result);
+    // Two phases (each its own request) keep every invocation under the
+    // serverless time limit. Default = propose; "synthesize" merges them.
+    if (body.phase === "synthesize") {
+      if (!Array.isArray(body.members)) {
+        return Response.json({ error: "Missing member plans to synthesize." }, { status: 400 });
+      }
+      const out = await synthesizePlans(idea.trim(), body.members as MemberResult[]);
+      return Response.json(out);
+    }
+    const members = await proposePlans(idea.trim());
+    return Response.json({ members });
   } catch (e) {
     return Response.json(
       { error: e instanceof Error ? e.message : "The council failed." },

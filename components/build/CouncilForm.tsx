@@ -47,13 +47,16 @@ export function CouncilForm() {
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const [contextBrief, setContextBrief] = useState<string | null>(null);
   const [contextName, setContextName] = useState<string | null>(null);
+  const [contexts, setContexts] = useState<{ slug: string; name: string }[]>([]);
+  const [pendingIdea, setPendingIdea] = useState<string | null>(null); // awaiting project pick
 
-  async function loadContext(name: string, pc = passcode) {
+  // Loads (and returns) the brief for a project name; also updates the indicator.
+  async function loadContext(name: string, pc = passcode): Promise<string | null> {
     const slug = slugify(name);
     if (!slug || !pc) {
       setContextBrief(null);
       setContextName(null);
-      return;
+      return null;
     }
     try {
       const r = await fetch(`/api/context?slug=${encodeURIComponent(slug)}`, {
@@ -63,14 +66,14 @@ export function CouncilForm() {
         const d = await r.json();
         setContextBrief(d.brief);
         setContextName(d.name);
-      } else {
-        setContextBrief(null);
-        setContextName(null);
+        return d.brief as string;
       }
     } catch {
-      setContextBrief(null);
-      setContextName(null);
+      /* fall through */
     }
+    setContextBrief(null);
+    setContextName(null);
+    return null;
   }
 
   useEffect(() => {
@@ -83,17 +86,24 @@ export function CouncilForm() {
       .then((r) => r.json())
       .then(setConfig)
       .catch(() => setConfig({ ready: false, members: [] }));
+    if (pc) {
+      fetch("/api/context", { headers: { "x-council-passcode": pc } })
+        .then((r) => (r.ok ? r.json() : { contexts: [] }))
+        .then((d) => setContexts(d.contexts ?? []))
+        .catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const post = (body: object) =>
+  const post = (body: object, ctx: string | null) =>
     fetch("/api/council", {
       method: "POST",
       headers: { "content-type": "application/json", "x-council-passcode": passcode },
-      body: JSON.stringify({ ...body, context: contextBrief ?? undefined }),
+      body: JSON.stringify({ ...body, context: ctx ?? undefined }),
     });
 
-  async function run(theIdea: string) {
+  async function run(theIdea: string, ctx: string | null = contextBrief) {
+    setPendingIdea(null);
     setError(null);
     setMembers(null);
     setSynth(null);
@@ -101,7 +111,7 @@ export function CouncilForm() {
     localStorage.setItem(PASSCODE_KEY, passcode);
     setPhase("proposing");
     try {
-      const r1 = await post({ idea: theIdea });
+      const r1 = await post({ idea: theIdea }, ctx);
       const d1 = await r1.json();
       if (!r1.ok) {
         setError(d1.error ?? `Request failed (${r1.status}).`);
@@ -111,13 +121,13 @@ export function CouncilForm() {
       setMembers(d1.members);
 
       setPhase("synthesizing");
-      const r2 = await post({ idea: theIdea, phase: "synthesize", members: d1.members });
+      const r2 = await post({ idea: theIdea, phase: "synthesize", members: d1.members }, ctx);
       const d2: Synth = await r2.json();
       setSynth(r2.ok ? d2 : { synthesis: null, synthesisError: (d2 as { error?: string }).error });
 
       if (r2.ok && d2.synthesis) {
         setPhase("hardening");
-        const r3 = await post({ idea: theIdea, phase: "critique", synthesis: d2.synthesis });
+        const r3 = await post({ idea: theIdea, phase: "critique", synthesis: d2.synthesis }, ctx);
         const d3: Critique = await r3.json();
         if (r3.ok) setCritique(d3);
       }
@@ -128,13 +138,37 @@ export function CouncilForm() {
     }
   }
 
+  // Convene: if no context is loaded but we know about projects, ASK which one
+  // first (rather than silently planning blind).
+  function convene() {
+    if (contextBrief || contexts.length === 0) {
+      run(idea);
+    } else {
+      setPendingIdea(idea);
+    }
+  }
+
+  // Picked a project from the clarifying prompt: load its context, then run.
+  async function pickProjectAndRun(name: string | null) {
+    const theIdea = pendingIdea ?? idea;
+    setPendingIdea(null);
+    if (name === null) {
+      run(theIdea, null); // generic, no context
+      return;
+    }
+    setProject(name);
+    localStorage.setItem(PROJECT_KEY, name);
+    const brief = await loadContext(name);
+    run(theIdea, brief);
+  }
+
   function doRefine() {
     const base = synth?.synthesis;
     if (!base || !refine.trim()) return;
     const withRevisions = base + (critique?.revisions ? `\n\nRed-team revisions to fold in:\n${critique.revisions}` : "");
     const augmented = `${idea}\n\n[Refinement request: ${refine.trim()}]\n\nThe council previously produced this plan — revise it to satisfy the refinement, keeping what still holds:\n\n${withRevisions}`;
     setRefine("");
-    run(augmented);
+    run(augmented, contextBrief);
   }
 
   async function saveCurrent() {
@@ -206,7 +240,7 @@ export function CouncilForm() {
         />
         <button
           type="button"
-          onClick={() => run(idea)}
+          onClick={convene}
           disabled={!canSubmit}
           className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
         >
@@ -236,6 +270,35 @@ export function CouncilForm() {
             </span>
           )}
         </p>
+      )}
+
+      {/* Clarifying prompt: asked when you convene without a context set */}
+      {pendingIdea && (
+        <div className="mt-3 rounded-lg border border-accent/40 bg-accent/[0.06] p-4">
+          <p className="mb-2 text-sm text-ink">
+            Which project is this for? I&rsquo;ll plan with its context so the council builds on what
+            already exists.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {contexts.map((c) => (
+              <button
+                key={c.slug}
+                type="button"
+                onClick={() => pickProjectAndRun(c.name)}
+                className="rounded-full border border-accent/50 bg-accent/10 px-3 py-1 text-sm text-ink transition-colors hover:bg-accent/20"
+              >
+                {c.name}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => pickProjectAndRun(null)}
+              className="rounded-full border border-edge px-3 py-1 text-sm text-muted transition-colors hover:text-ink"
+            >
+              None — generic plan
+            </button>
+          </div>
+        </div>
       )}
 
       {error && (

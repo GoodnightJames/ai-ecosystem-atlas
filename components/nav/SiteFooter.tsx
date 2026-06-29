@@ -1,9 +1,14 @@
 /**
- * Deploy strip — mirrors the dashboard footer. Commit SHA comes from Vercel's
- * build env (inlined at build time); falls back to "local" off-platform.
+ * Deploy strip — mirrors the dashboard footer. Commit SHA is inlined at build
+ * time: NEXT_PUBLIC_ATLAS_COMMIT (passed on CLI deploys) takes precedence, then
+ * Vercel's git SHA (git-connected deploys), else "local". `|| ""` guards against
+ * the empty-string the CLI sets for VERCEL_GIT_COMMIT_SHA.
  */
 const COMMIT =
-  process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local";
+  (process.env.NEXT_PUBLIC_ATLAS_COMMIT || process.env.VERCEL_GIT_COMMIT_SHA || "local").slice(
+    0,
+    7,
+  );
 
 export function SiteFooter() {
   return (

@@ -124,7 +124,7 @@ function toolingBrief(): string {
           ? `$${m.pricing.inputPerMTok}/$${m.pricing.outputPerMTok} per Mtok`
           : "—";
       const id = m.api?.modelString ? `\`${m.api.modelString}\`` : "—";
-      return `- ${m.name} → ${id} (${m.labId}, ${m.tier}; ${p}): ${m.bestFor?.[0] ?? m.summary}`;
+      return `- ${m.name} → ${id} (${m.labId}, ${m.tier}; ${p}; modalities: ${m.modalities.join("/")}): ${m.bestFor?.[0] ?? m.summary}`;
     })
     .join("\n");
   return `CURRENT AI TOOLING (from the builder's catalogue — prefer these for any AI features and name the exact API id; verify current ids/params against each provider's live docs):
@@ -132,8 +132,10 @@ function toolingBrief(): string {
 Calling protocols:
 ${protocols}
 
-Models (name → API id; when to reach for it):
-${perModel}`;
+Models (name → API id; modalities; when to reach for it):
+${perModel}
+
+Match the model to the task's modality: never recommend a text-only model for image, audio, or video work — pick one whose modalities include what the task needs (e.g. image generation → an image model; understanding photos → a multimodal model).`;
 }
 
 function lensInstruction(label?: string): string {
@@ -285,6 +287,9 @@ ${REV_MARKER}
 - the concrete changes to apply to the plan — specific deltas, not a rewrite.
 
 ${BUILDER_PROFILE}
+
+${toolingBrief()}
+The calling protocols and model ids above are current and correct — do NOT flag them as unverified, and do not tell the user to remove documented params (e.g. output_config.effort, adaptive thinking). Critique the plan's design, logic, security, modality fit, and gaps instead.
 
 PROJECT IDEA:
 ${idea}

@@ -105,6 +105,55 @@ export interface Pricing {
   note?: string;
 }
 
+/**
+ * A concrete worked example of what the model is good at — the "demonstration"
+ * layer. `why` explains the reasoning, not just the what.
+ */
+export interface UseCase {
+  /** Short label, e.g. "Agentic coding", "Bulk outreach copy". */
+  title: string;
+  /** The scenario in plain terms — ideally grounded in a real workflow. */
+  scenario: string;
+  /** Why THIS model fits the scenario (capabilities, price, context, etc.). */
+  why: string;
+}
+
+/**
+ * A published evaluation result, stored structured so it can be rendered as a
+ * comparison bar and compared across models sharing the same `name`.
+ */
+export interface Benchmark {
+  /** Eval name, e.g. "SWE-bench Verified", "GPQA Diamond". */
+  name: string;
+  /** The model's score on this eval, in the unit implied by `max`. */
+  score: number;
+  /** Scale ceiling (default 100 for percentage scores). */
+  max?: number;
+  /** What the eval measures, one line. */
+  blurb?: string;
+  sourceUrl?: string;
+}
+
+/**
+ * Everything needed to actually call the model. The runnable snippet is
+ * generated per-lab from these fields (see lib/api-snippet) rather than stored,
+ * so it stays consistent and there's one fact per field.
+ */
+export interface ApiInfo {
+  /** The exact model-ID string you pass to the API, e.g. "claude-opus-4-8". */
+  modelString: string;
+  /** Official SDK package, e.g. "@anthropic-ai/sdk". */
+  sdkPackage?: string;
+  /** Env var the SDK reads the key from, e.g. "ANTHROPIC_API_KEY". */
+  envVar?: string;
+  /** REST endpoint the SDK posts to. */
+  endpoint?: string;
+  /** Link to the lab's API docs. */
+  docsUrl: string;
+  /** Anything caller-relevant: beta headers, access notes, gotchas. */
+  note?: string;
+}
+
 // ── Core entities ───────────────────────────────────────────────────────────
 
 export interface Model {
@@ -127,6 +176,16 @@ export interface Model {
   flagship?: boolean;
   summary: string;
   highlights: string[];
+  /** "Reach for this when…" — decision guidance, a few short phrases. */
+  bestFor?: string[];
+  /** "Skip it when…" — where another model is the better call. */
+  notIdealFor?: string[];
+  /** Concrete worked examples with reasoning (the demonstration layer). */
+  useCases?: UseCase[];
+  /** Published eval results, rendered as comparison bars. */
+  benchmarks?: Benchmark[];
+  /** How to actually call it — model-ID string, SDK, snippet inputs, docs. */
+  api?: ApiInfo;
   /** Playful naming-theme note (Sol/Terra/Luna, Rosalind, Nano Banana, …). */
   namingTheme?: string;
   /** ID of the model this one supersedes. */

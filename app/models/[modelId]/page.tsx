@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { allModels, getLab, getModel } from "@/data";
 import { StatusDot } from "@/components/kit/StatusDot";
 import { Chip } from "@/components/kit/Chip";
+import { CodeBlock } from "@/components/kit/CodeBlock";
 import { FreshnessBadge } from "@/components/kit/FreshnessBadge";
 import {
   STATUS_META,
@@ -12,6 +13,7 @@ import {
   formatPricing,
   titleCase,
 } from "@/lib/format";
+import { buildSnippet } from "@/lib/api-snippet";
 import { labStyle } from "@/lib/theme";
 
 export function generateStaticParams() {
@@ -40,6 +42,47 @@ function Spec({ label, value }: { label: string; value: string }) {
   );
 }
 
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-subtle">
+      {children}
+    </h2>
+  );
+}
+
+/** A labelled fill bar for a benchmark score, relative to its scale ceiling. */
+function BenchmarkBar({
+  name,
+  score,
+  max = 100,
+  blurb,
+}: {
+  name: string;
+  score: number;
+  max?: number;
+  blurb?: string;
+}) {
+  const pct = Math.max(0, Math.min(100, (score / max) * 100));
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-sm font-medium text-ink">{name}</span>
+        <span className="font-mono text-sm text-muted">
+          {score}
+          {max === 100 ? "%" : ` / ${max}`}
+        </span>
+      </div>
+      <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-raised">
+        <div
+          className="h-full rounded-full"
+          style={{ width: `${pct}%`, background: "var(--lab-accent)" }}
+        />
+      </div>
+      {blurb && <p className="mt-1 text-xs text-subtle">{blurb}</p>}
+    </div>
+  );
+}
+
 export default async function ModelPage({
   params,
 }: {
@@ -53,6 +96,11 @@ export default async function ModelPage({
   const meta = STATUS_META[model.status];
   const routesTo = model.routesTo ? getModel(model.routesTo) : undefined;
   const supersedes = model.supersedes ? getModel(model.supersedes) : undefined;
+  // Chat-shaped snippet only makes sense for text/code models — for media
+  // models we still show the model-ID + endpoint + docs, just no snippet.
+  const isChatLike =
+    model.modalities.includes("text") || model.modalities.includes("code");
+  const snippet = model.api && isChatLike ? buildSnippet(model.labId, model.api) : null;
 
   return (
     <div style={labStyle(model.labId)} className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
@@ -117,9 +165,112 @@ export default async function ModelPage({
         ))}
       </div>
 
+      {/* Best for / Not ideal for */}
+      {(model.bestFor || model.notIdealFor) && (
+        <section className="mt-8 grid gap-4 sm:grid-cols-2">
+          {model.bestFor && (
+            <div className="rounded-lg border border-edge bg-surface p-4">
+              <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink">
+                <span style={{ color: "var(--color-go)" }} aria-hidden>
+                  ✓
+                </span>
+                Reach for this when
+              </h2>
+              <ul className="flex flex-col gap-1.5">
+                {model.bestFor.map((b, i) => (
+                  <li key={i} className="text-sm leading-snug text-muted">
+                    {b}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {model.notIdealFor && (
+            <div className="rounded-lg border border-edge bg-surface p-4">
+              <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink">
+                <span style={{ color: "var(--color-stop)" }} aria-hidden>
+                  ✕
+                </span>
+                Skip it when
+              </h2>
+              <ul className="flex flex-col gap-1.5">
+                {model.notIdealFor.map((b, i) => (
+                  <li key={i} className="text-sm leading-snug text-muted">
+                    {b}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* How to call it */}
+      {model.api && (
+        <section className="mt-8">
+          <SectionTitle>How to call it</SectionTitle>
+          <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+            <Chip color="var(--lab-accent)" title="The exact model-ID string">
+              <span className="font-mono">{model.api.modelString}</span>
+            </Chip>
+            {model.api.endpoint && (
+              <span className="font-mono text-xs text-subtle">{model.api.endpoint}</span>
+            )}
+          </div>
+          {snippet && snippet.install && (
+            <div className="mb-2">
+              <CodeBlock label="install" code={snippet.install} />
+            </div>
+          )}
+          {snippet && <CodeBlock label={snippet.language} code={snippet.code} />}
+          {model.api.note && (
+            <p className="mt-2 text-xs leading-relaxed text-subtle">{model.api.note}</p>
+          )}
+          <a
+            href={model.api.docsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 inline-block text-sm text-accent hover:underline"
+          >
+            API docs ↗
+          </a>
+        </section>
+      )}
+
+      {/* Benchmarks */}
+      {model.benchmarks && model.benchmarks.length > 0 && (
+        <section className="mt-8">
+          <SectionTitle>Benchmarks</SectionTitle>
+          <div className="flex flex-col gap-4">
+            {model.benchmarks.map((b) => (
+              <BenchmarkBar key={b.name} {...b} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Where it fits — use cases */}
+      {model.useCases && model.useCases.length > 0 && (
+        <section className="mt-8">
+          <SectionTitle>Where it fits</SectionTitle>
+          <div className="flex flex-col gap-3">
+            {model.useCases.map((u) => (
+              <div key={u.title} className="rounded-lg border border-edge bg-surface p-4">
+                <h3 className="text-sm font-semibold text-ink">{u.title}</h3>
+                <p className="mt-1 text-sm leading-snug text-muted">{u.scenario}</p>
+                <p className="mt-2 text-sm leading-snug text-subtle">
+                  <span style={{ color: "var(--lab-accent)" }}>Why — </span>
+                  {u.why}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Highlights */}
       <section className="mt-8">
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-subtle">Highlights</h2>
+        <SectionTitle>Highlights</SectionTitle>
         <ul className="flex flex-col gap-2">
           {model.highlights.map((h, i) => (
             <li key={i} className="flex gap-2 text-sm leading-snug text-muted">

@@ -35,8 +35,8 @@ export interface MemberResult extends Member {
 }
 export interface CritiqueResult {
   critic: string;
-  critique: string;
-  finalPlan: string | null;
+  critique: string; // red-team notes
+  revisions: string | null; // concrete deltas to apply (not a full rewrite)
   error?: string;
 }
 export interface CouncilResult {
@@ -234,52 +234,51 @@ export async function synthesizePlans(
   }
 }
 
-// ── Phase 3 — red-team & revise (a DIFFERENT model than the synthesizer) ─────
-const FINAL_MARKER = "## Final plan";
+// ── Phase 3 — red-team (a DIFFERENT model than the synthesizer) ──────────────
+// Outputs notes + concrete revisions (deltas), NOT a full rewrite — keeps the
+// call light enough to finish inside the serverless time limit.
+const REV_MARKER = "## Revisions to apply";
 
 export async function critiquePlan(idea: string, synthesis: string): Promise<CritiqueResult> {
   const cm = configuredMembers();
   // Prefer a non-Anthropic critic (the synthesizer is Anthropic) for real diversity.
   const critic = cm.find((m) => m.provider !== "anthropic") ?? cm[0];
-  if (!critic) return { critic: "—", critique: "", finalPlan: null, error: "No critic configured." };
+  if (!critic) return { critic: "—", critique: "", revisions: null, error: "No critic configured." };
 
-  const prompt = `You are a senior engineer doing a red-team review of a build plan. Be adversarial but fair.
+  const prompt = `You are a senior engineer doing a red-team review of a build plan. Be adversarial but fair, and concise.
 
-First, critique the plan: what's missing, wrong, over-engineered, or genuinely risky? 3–6 sharp bullets.
-Then output an improved FINAL plan that fixes those issues — same decisive, phased structure.
-
-Format your answer EXACTLY like this, with these two headings:
+Output EXACTLY these two sections:
 ## Red-team notes
-- ...
-${FINAL_MARKER}
-<the improved, hardened plan in markdown>
+- 3–6 sharp bullets: what's missing, wrong, over-engineered, or genuinely risky.
+${REV_MARKER}
+- the concrete changes to apply to the plan — specific deltas, not a rewrite.
 
 ${BUILDER_PROFILE}
 
 PROJECT IDEA:
 ${idea}
 
-PLAN TO REVIEW:
+PLAN:
 ${synthesis}`;
 
   try {
     const text = await withTimeout(
-      callProvider(critic.provider, prompt, critic.model, 3000),
+      callProvider(critic.provider, prompt, critic.model, 1500),
       CALL_TIMEOUT_MS,
       "Critique",
     );
-    const idx = text.indexOf(FINAL_MARKER);
+    const idx = text.indexOf(REV_MARKER);
     if (idx === -1) {
-      return { critic: `${critic.label} · ${critic.model}`, critique: "", finalPlan: text };
+      return { critic: `${critic.label} · ${critic.model}`, critique: text.trim(), revisions: null };
     }
     const critique = text.slice(0, idx).replace(/^##\s*Red-team notes\s*/i, "").trim();
-    const finalPlan = text.slice(idx + FINAL_MARKER.length).trim();
-    return { critic: `${critic.label} · ${critic.model}`, critique, finalPlan };
+    const revisions = text.slice(idx + REV_MARKER.length).trim();
+    return { critic: `${critic.label} · ${critic.model}`, critique, revisions };
   } catch (e) {
     return {
       critic: `${critic.label} · ${critic.model}`,
       critique: "",
-      finalPlan: null,
+      revisions: null,
       error: e instanceof Error ? e.message : "Critique failed.",
     };
   }

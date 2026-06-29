@@ -18,7 +18,7 @@ interface Synth {
 interface Critique {
   critic: string;
   critique: string;
-  finalPlan: string | null;
+  revisions: string | null;
   error?: string;
 }
 interface Config {
@@ -123,9 +123,10 @@ export function CouncilForm() {
   }
 
   function doRefine() {
-    const base = critique?.finalPlan ?? synth?.synthesis;
+    const base = synth?.synthesis;
     if (!base || !refine.trim()) return;
-    const augmented = `${idea}\n\n[Refinement request: ${refine.trim()}]\n\nThe council previously produced this plan — revise it to satisfy the refinement, keeping what still holds:\n\n${base}`;
+    const withRevisions = base + (critique?.revisions ? `\n\nRed-team revisions to fold in:\n${critique.revisions}` : "");
+    const augmented = `${idea}\n\n[Refinement request: ${refine.trim()}]\n\nThe council previously produced this plan — revise it to satisfy the refinement, keeping what still holds:\n\n${withRevisions}`;
     setRefine("");
     run(augmented);
   }
@@ -158,13 +159,16 @@ export function CouncilForm() {
   const busy = phase !== "idle";
   const memberCount = config?.members.length ?? 0;
   const canSubmit = idea.trim().length >= 10 && passcode.trim().length > 0 && !busy;
-  const finalPlan = critique?.finalPlan ?? synth?.synthesis ?? "";
-  const claudeCodePrompt = finalPlan
-    ? `Implement the following plan in this repository. Work phase by phase; after each phase run the build/tests and report. Ask before any destructive or irreversible action. Keep changes minimal and match existing conventions.\n\n${finalPlan}`
+  const planText = synth?.synthesis ?? "";
+  const exportText = planText
+    ? planText + (critique?.revisions ? `\n\n## Red-team revisions\n${critique.revisions}` : "")
+    : "";
+  const claudeCodePrompt = exportText
+    ? `Implement the following plan in this repository. Work phase by phase; after each phase run the build/tests and report. Ask before any destructive or irreversible action. Keep changes minimal and match existing conventions.\n\n${exportText}`
     : "";
 
   function downloadMd() {
-    const blob = new Blob([finalPlan], { type: "text/markdown" });
+    const blob = new Blob([exportText], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -263,51 +267,52 @@ export function CouncilForm() {
       {/* Results */}
       {members && (
         <div className="mt-8">
-          {/* Final (red-teamed) plan */}
+          {/* Synthesized plan */}
           {phase === "synthesizing" || phase === "hardening" ? (
             <div className="rounded-xl border border-accent/40 bg-accent/[0.06] p-5 text-sm text-muted">
               <span className="text-accent" aria-hidden>✦</span>{" "}
               {phase === "synthesizing"
                 ? `Synthesizing from ${members.filter((m) => m.plan).length} proposal(s)…`
-                : "Red-teaming & revising the plan…"}
+                : "Red-teaming the plan…"}
             </div>
-          ) : finalPlan ? (
+          ) : planText ? (
             <section className="rounded-xl border border-accent/40 bg-accent/[0.06] p-5">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <h2 className="flex items-center gap-2 text-base font-bold text-ink">
                   <span className="text-accent" aria-hidden>✦</span>
-                  {critique?.finalPlan ? "Final plan (red-teamed)" : "Synthesized plan"}
+                  Synthesized plan
                 </h2>
                 <div className="flex gap-1.5">
-                  <CopyBtn text={finalPlan} label="Copy" />
+                  <CopyBtn text={exportText} label="Copy" />
                   <CopyBtn text={claudeCodePrompt} label="Copy for Claude Code" />
-                  <button
-                    type="button"
-                    onClick={downloadMd}
-                    className="rounded-md border border-edge px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:bg-raised hover:text-ink"
-                  >
-                    .md
-                  </button>
-                  <button
-                    type="button"
-                    onClick={saveCurrent}
-                    className="rounded-md border border-edge px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:bg-raised hover:text-ink"
-                  >
-                    Save
-                  </button>
+                  <button type="button" onClick={downloadMd} className="rounded-md border border-edge px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:bg-raised hover:text-ink">.md</button>
+                  <button type="button" onClick={saveCurrent} className="rounded-md border border-edge px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:bg-raised hover:text-ink">Save</button>
                 </div>
               </div>
-              {critique?.finalPlan && critique.critic && (
+              {critique?.revisions && critique.critic && (
                 <p className="mb-3 text-xs text-subtle">Red-teamed by {critique.critic}</p>
               )}
-              <Markdown text={finalPlan} />
+              <Markdown text={planText} />
             </section>
           ) : (
             <p className="text-sm text-subtle">{synth?.synthesisError}</p>
           )}
 
+          {/* Red-team revisions callout */}
+          {critique?.revisions && (
+            <section
+              className="mt-3 rounded-xl border p-5"
+              style={{ borderColor: "color-mix(in srgb, var(--color-warn) 40%, transparent)", background: "color-mix(in srgb, var(--color-warn) 8%, transparent)" }}
+            >
+              <h3 className="mb-2 flex items-center gap-2 text-sm font-bold text-ink">
+                <span style={{ color: "var(--color-warn)" }} aria-hidden>⚑</span> Red-team revisions
+              </h3>
+              <Markdown text={critique.revisions} />
+            </section>
+          )}
+
           {/* Refine */}
-          {finalPlan && phase === "idle" && (
+          {planText && phase === "idle" && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <input
                 value={refine}
@@ -338,17 +343,6 @@ export function CouncilForm() {
               </div>
             </details>
           )}
-          {critique?.finalPlan && synth?.synthesis && (
-            <details className="mt-2 rounded-lg border border-edge bg-surface">
-              <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium text-ink">
-                <span className="mr-2 text-subtle" aria-hidden>▸</span>Pre-critique synthesis
-              </summary>
-              <div className="border-t border-edge px-4 py-3">
-                <Markdown text={synth.synthesis} />
-              </div>
-            </details>
-          )}
-
           {/* Member proposals */}
           <h3 className="mb-2 mt-8 text-sm font-semibold uppercase tracking-wide text-subtle">
             What each model proposed

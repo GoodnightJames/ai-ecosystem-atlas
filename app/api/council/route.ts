@@ -1,4 +1,4 @@
-import { configuredMembers, proposePlans, synthesizePlans } from "@/lib/council";
+import { configuredMembers, proposePlans, synthesizePlans, critiquePlan } from "@/lib/council";
 import type { MemberResult } from "@/lib/council";
 
 export const runtime = "nodejs";
@@ -12,7 +12,7 @@ export function GET() {
   return Response.json({
     ready: Boolean(process.env.COUNCIL_PASSCODE) && members.length > 0,
     passcodeRequired: Boolean(process.env.COUNCIL_PASSCODE),
-    members: members.map(({ provider, label, model }) => ({ provider, label, model })),
+    members: members.map(({ provider, label, model, lens }) => ({ provider, label, model, lens })),
   });
 }
 
@@ -31,7 +31,7 @@ export async function POST(req: Request) {
     return Response.json({ error: "Wrong or missing passcode." }, { status: 401 });
   }
 
-  let body: { idea?: unknown; phase?: unknown; members?: unknown };
+  let body: { idea?: unknown; phase?: unknown; members?: unknown; synthesis?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -53,6 +53,13 @@ export async function POST(req: Request) {
         return Response.json({ error: "Missing member plans to synthesize." }, { status: 400 });
       }
       const out = await synthesizePlans(idea.trim(), body.members as MemberResult[]);
+      return Response.json(out);
+    }
+    if (body.phase === "critique") {
+      if (typeof body.synthesis !== "string" || !body.synthesis.trim()) {
+        return Response.json({ error: "Missing synthesis to critique." }, { status: 400 });
+      }
+      const out = await critiquePlan(idea.trim(), body.synthesis);
       return Response.json(out);
     }
     const members = await proposePlans(idea.trim());

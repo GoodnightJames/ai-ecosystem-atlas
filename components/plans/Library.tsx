@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Markdown } from "@/components/kit/Markdown";
+import { CopyButton } from "@/components/kit/CopyButton";
+import { planMarkdown, agentPrompt, downloadMarkdown } from "@/lib/plan-export";
 
 interface Summary {
   id: string;
@@ -94,6 +96,25 @@ export function Library() {
         <p className="mt-1 text-xs text-subtle">
           {open.project} · {new Date(open.createdAt).toLocaleString()}
         </p>
+
+        {/* Export — one click to take this into a coding agent */}
+        {(() => {
+          const md = planMarkdown(open.synth?.synthesis, open.critique?.revisions);
+          return (
+            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+              <CopyButton text={md} label="Copy plan" />
+              <CopyButton text={agentPrompt(md)} label="Copy for Claude Code / Codex" />
+              <button
+                type="button"
+                onClick={() => downloadMarkdown(md, `${open.project}-${open.title}`.replace(/[^\w-]+/g, "-").toLowerCase() + ".md")}
+                className="rounded-md border border-edge px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:bg-raised hover:text-ink"
+              >
+                .md
+              </button>
+            </div>
+          );
+        })()}
+
         <p className="mt-3 rounded-lg border border-edge bg-surface p-3 text-sm text-muted">{open.idea}</p>
 
         {open.synth?.synthesis && (

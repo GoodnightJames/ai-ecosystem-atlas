@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { Markdown } from "@/components/kit/Markdown";
+import { CopyButton } from "@/components/kit/CopyButton";
+import { planMarkdown, agentPrompt, downloadMarkdown } from "@/lib/plan-export";
 
 interface MemberResult {
   provider: string;
@@ -29,25 +31,6 @@ type Phase = "idle" | "proposing" | "synthesizing" | "hardening";
 
 const PASSCODE_KEY = "council-passcode";
 const PROJECT_KEY = "council-project";
-
-function CopyBtn({ text, label }: { text: string; label: string }) {
-  const [done, setDone] = useState(false);
-  return (
-    <button
-      type="button"
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(text);
-          setDone(true);
-          setTimeout(() => setDone(false), 1500);
-        } catch {}
-      }}
-      className="rounded-md border border-edge px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:bg-raised hover:text-ink"
-    >
-      {done ? "Copied ✓" : label}
-    </button>
-  );
-}
 
 export function CouncilForm() {
   const [config, setConfig] = useState<Config | null>(null);
@@ -143,22 +126,8 @@ export function CouncilForm() {
   const memberCount = config?.members.length ?? 0;
   const canSubmit = idea.trim().length >= 10 && passcode.trim().length > 0 && !busy;
   const planText = synth?.synthesis ?? "";
-  const exportText = planText
-    ? planText + (critique?.revisions ? `\n\n## Red-team revisions\n${critique.revisions}` : "")
-    : "";
-  const claudeCodePrompt = exportText
-    ? `Implement the following plan in this repository. Work phase by phase; after each phase run the build/tests and report. Ask before any destructive or irreversible action. Keep changes minimal and match existing conventions.\n\n${exportText}`
-    : "";
-
-  function downloadMd() {
-    const blob = new Blob([exportText], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "build-plan.md";
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+  const exportText = planText ? planMarkdown(synth?.synthesis, critique?.revisions) : "";
+  const ccPrompt = agentPrompt(exportText);
 
   return (
     <div className="mt-6">
@@ -241,9 +210,9 @@ export function CouncilForm() {
                   Synthesized plan
                 </h2>
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <CopyBtn text={exportText} label="Copy" />
-                  <CopyBtn text={claudeCodePrompt} label="Copy for Claude Code" />
-                  <button type="button" onClick={downloadMd} className="rounded-md border border-edge px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:bg-raised hover:text-ink">.md</button>
+                  <CopyButton text={exportText} label="Copy" />
+                  <CopyButton text={ccPrompt} label="Copy for Claude Code / Codex" />
+                  <button type="button" onClick={() => downloadMarkdown(exportText, "build-plan.md")} className="rounded-md border border-edge px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:bg-raised hover:text-ink">.md</button>
                   <input
                     value={project}
                     onChange={(e) => setProject(e.target.value)}

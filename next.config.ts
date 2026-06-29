@@ -1,13 +1,12 @@
 import type { NextConfig } from "next";
 import path from "node:path";
 
-// Static export: pure SSG, no server, no DB. Every route prerenders to HTML so the
-// catalogue can be hosted anywhere (Vercel, GitHub Pages, an S3 bucket).
+// Mostly SSG: every content route still prerenders to HTML. We dropped
+// `output: "export"` so the app can also serve ONE dynamic serverless route —
+// /api/council (the live multi-model planner) — which a pure static export
+// can't host. Content pages remain static; only the API route runs on demand.
 const nextConfig: NextConfig = {
-  output: "export",
   images: { unoptimized: true },
-  // This app lives inside the merch-buying-desk repo for now. Pin the workspace root
-  // so Next/Turbopack don't walk up and adopt the parent app's lockfile/config.
   outputFileTracingRoot: path.join(__dirname),
   turbopack: { root: path.join(__dirname) },
 };

@@ -20,8 +20,9 @@ labs had frontier models placed under government access restrictions.
 
 ## Stack
 
-Next.js 16 (App Router, **static export**) · React 19 · TypeScript (strict) · Tailwind CSS v4 ·
-Vitest. No database, no auth, no server — every route prerenders to HTML in `out/`.
+Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind CSS v4 · Vitest. Every
+content route is statically prerendered; the one exception is **`/api/council`**, a dynamic
+serverless route powering the live "Plan a build" model council (see below). No database, no auth.
 
 ## Develop
 
@@ -31,8 +32,20 @@ npm run dev        # http://localhost:3000
 npm run test       # data-integrity + filtering unit tests (Vitest)
 npm run typecheck  # tsc --noEmit
 npm run lint       # eslint
-npm run build      # static export → ./out
+npm run build      # production build → ./.next
 ```
+
+## Plan a build — the live model council (`/build`)
+
+Describe a project and a council of **real** current models each proposes how to build it, then
+Claude synthesizes one recommended plan. It calls live APIs, so it needs keys (server-side only —
+never the browser) and a passcode gate. Without them the rest of the site works fine and `/build`
+shows a setup notice. Configure in Vercel env (and `.env.local` for dev) — see [`.env.example`](./.env.example):
+
+- `COUNCIL_PASSCODE` — required gate so the endpoint can't burn your API budget.
+- `ANTHROPIC_API_KEY` — required; the default member and the synthesizer (`claude-opus-4-8`).
+- `OPENAI_API_KEY` + `COUNCIL_OPENAI_MODEL`, `GEMINI_API_KEY` + `COUNCIL_GOOGLE_MODEL` — optional
+  extra members. Use **real, callable** model ids — the catalogue's speculative ids won't resolve.
 
 ## Data model (single source of truth)
 
@@ -55,18 +68,19 @@ human-approval step before they land in `data/`.
 
 ## Deploy (Vercel)
 
-The app is a Next.js static export (`output: "export"`), so it deploys as a static site — no server,
-no env vars, no secrets. From the repo root:
+Vercel auto-detects Next.js — content pages serve as static assets and `/api/council` runs as a
+serverless function. From the repo root:
 
 ```bash
 npx vercel          # link & deploy a preview
 npx vercel --prod   # promote to production
 ```
 
-Vercel auto-detects Next.js and runs `npm run build`, serving the generated `out/`. Because this is
-its own repo now, there's no monorepo/root-directory clash to configure — accept the defaults.
+The site deploys and works without any env vars (the council just stays disabled). To enable the
+council, add the env vars from [`.env.example`](./.env.example) in the Vercel project settings.
 
-Any static host works too: run `npm run build` and serve the `out/` directory.
+> The footer commit SHA is inlined at build. CLI deploys don't auto-set it, so pass it through:
+> `npx vercel --prod -b NEXT_PUBLIC_ATLAS_COMMIT=$(git rev-parse --short HEAD)`.
 
 ---
 

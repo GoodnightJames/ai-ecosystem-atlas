@@ -4,9 +4,9 @@ An informative, interactive, **static** visualization of the OpenAI, Anthropic, 
 lineups as of **late June 2026** — including the dramatic fortnight when two of the three major US
 labs had frontier models placed under government access restrictions.
 
-> **Standalone project.** This app lives inside the `merch-buying-desk` repo for now but shares **no
-> code** with it (its own `package.json`, its own everything). It's built to be lifted into its own
-> repository — see *Extraction* below.
+> **Standalone project.** Extracted (with history) from the `merch-buying-desk` repo into its own
+> repository at [`GoodnightJames/ai-ecosystem-atlas`](https://github.com/GoodnightJames/ai-ecosystem-atlas).
+> It shares no code with anything else — its own `package.json`, its own everything.
 
 ## What's here
 
@@ -53,14 +53,20 @@ This v1 is the static visualization. The data layer is deliberately agent-ready:
 an update-agent that diffs each entry against its `sourceUrl`, then proposes changes through a
 human-approval step before they land in `data/`.
 
-## Extraction into its own repo
+## Deploy (Vercel)
 
-The project is self-contained, so it lifts out cleanly while preserving history:
+The app is a Next.js static export (`output: "export"`), so it deploys as a static site — no server,
+no env vars, no secrets. From the repo root:
 
 ```bash
-git subtree split --prefix=ai-ecosystem-catalog -b ai-ecosystem-atlas
-# then push that branch to a fresh repo
+npx vercel          # link & deploy a preview
+npx vercel --prod   # promote to production
 ```
+
+Vercel auto-detects Next.js and runs `npm run build`, serving the generated `out/`. Because this is
+its own repo now, there's no monorepo/root-directory clash to configure — accept the defaults.
+
+Any static host works too: run `npm run build` and serve the `out/` directory.
 
 ---
 

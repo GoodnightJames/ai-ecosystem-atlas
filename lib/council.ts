@@ -92,18 +92,48 @@ export function configuredMembers(): Member[] {
   return members;
 }
 
-/** Compact catalogue digest so plans name real (catalogue) models, not stale ones. */
-function modelDigest(): string {
-  return models
-    .filter((m) => m.status === "ga")
+// Authoritative Anthropic calling protocol (from the loaded API reference — the
+// one thing we have that models reliably get WRONG, e.g. emitting budget_tokens).
+const ANTHROPIC_PROTOCOL = `Anthropic — SDK \`@anthropic-ai/sdk\` (Python \`anthropic\`). Real model ids: claude-opus-4-8 (flagship), claude-sonnet-4-6 (balanced), claude-haiku-4-5 (fast), claude-fable-5 (most capable). Use adaptive thinking (\`thinking: {type:"adaptive"}\`) — \`budget_tokens\`, \`temperature\`, \`top_p\` are REMOVED on Opus 4.7+/Fable and 400. Control depth with \`output_config.effort\` (low|medium|high|xhigh|max). Endpoint POST /v1/messages; stream when max_tokens is large.`;
+
+const LAB_NAMES: Record<string, string> = { anthropic: "Anthropic", openai: "OpenAI", google: "Google" };
+
+/**
+ * Grounding brief: per-lab calling protocols + per-model API ids and when to
+ * reach for each, drawn from the catalogue. Anthropic's protocol is the loaded
+ * authoritative one; the rest carry a "verify against live docs" caveat because
+ * those ids are a curated snapshot, not gospel.
+ */
+function toolingBrief(): string {
+  const ga = models.filter((m) => m.status === "ga");
+  const labProto = (lab: string): string => {
+    if (lab === "anthropic") return ANTHROPIC_PROTOCOL;
+    const m = ga.find((x) => x.labId === lab && x.api);
+    if (!m?.api) return "";
+    return `${LAB_NAMES[lab]} — SDK \`${m.api.sdkPackage ?? "?"}\`, key env \`${m.api.envVar ?? "?"}\`${m.api.note ? `. ${m.api.note}` : ""}`;
+  };
+  const protocols = ["anthropic", "openai", "google"]
+    .map(labProto)
+    .filter(Boolean)
+    .map((s) => `- ${s}`)
+    .join("\n");
+  const perModel = ga
     .map((m) => {
       const p =
         m.pricing && m.pricing.inputPerMTok != null
           ? `$${m.pricing.inputPerMTok}/$${m.pricing.outputPerMTok} per Mtok`
           : "—";
-      return `- ${m.name} (${m.labId}, ${m.tier}; ${p}): ${m.bestFor?.[0] ?? m.summary}`;
+      const id = m.api?.modelString ? `\`${m.api.modelString}\`` : "—";
+      return `- ${m.name} → ${id} (${m.labId}, ${m.tier}; ${p}): ${m.bestFor?.[0] ?? m.summary}`;
     })
     .join("\n");
+  return `CURRENT AI TOOLING (from the builder's catalogue — prefer these for any AI features and name the exact API id; verify current ids/params against each provider's live docs):
+
+Calling protocols:
+${protocols}
+
+Models (name → API id; when to reach for it):
+${perModel}`;
 }
 
 function lensInstruction(label?: string): string {
@@ -115,8 +145,7 @@ const planPrompt = (idea: string, lens?: string) =>
 
 ${BUILDER_PROFILE}
 
-When recommending AI models/APIs, prefer these current options from the builder's catalogue and name them specifically:
-${modelDigest()}
+${toolingBrief()}
 
 A builder describes a project below. Produce a concise, opinionated build plan: recommended stack/approach, 3–5 phased milestones, the top risks/unknowns, and which model(s)/APIs to use for any AI features. Be specific and decisive. Markdown, ~300–450 words. Respond with the plan only.
 
@@ -208,9 +237,11 @@ Structure:
 3. **Where they diverged** — the real decisions, with your call on each.
 4. **Alternative plan** — only if a genuinely different approach is defensible.
 
-Be decisive — you're the deciding architect, not a summarizer. Markdown.
+Be decisive — you're the deciding architect, not a summarizer. For any AI features, name the exact API model id. Markdown.
 
 ${BUILDER_PROFILE}
+
+${toolingBrief()}
 
 PROJECT IDEA:
 ${idea}
